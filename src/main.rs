@@ -1,13 +1,15 @@
+mod error;
 mod message;
 mod ws;
 
 use crate::ws::handle_websocket;
 use axum::{
     extract::{Path, State},
-    response::IntoResponse,
     routing::{get, post},
     Json, Router,
 };
+use error::ChattyError::ServerError;
+use error::Result;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},
@@ -45,8 +47,14 @@ async fn main() {
         .unwrap();
 }
 
-async fn get_rooms(State(state): State<Arc<AppState>>) -> impl IntoResponse {
-    let rooms = state.rooms.lock().unwrap().clone();
+async fn get_rooms(State(state): State<Arc<AppState>>) -> Result<Json<Vec<RoomResponse>>> {
+    let rooms = match state.rooms.lock() {
+        Ok(rooms) => rooms.clone(),
+        Err(err) => {
+            println!("{:?}", err);
+            return Err(ServerError);
+        }
+    };
 
     let mut room_vec: Vec<RoomResponse> = vec![];
 
@@ -60,7 +68,7 @@ async fn get_rooms(State(state): State<Arc<AppState>>) -> impl IntoResponse {
         room_vec.push(new_room);
     }
 
-    Json(room_vec)
+    Ok(Json::from(room_vec))
 }
 
 #[derive(Deserialize)]
@@ -76,18 +84,24 @@ struct Id {
 async fn new_room(
     State(state): State<Arc<AppState>>,
     Json(body): Json<NewRoom>,
-) -> impl IntoResponse {
+) -> Result<Json<Id>> {
     let mut room = RoomState::new();
 
     room.name = body.name.to_owned();
 
-    let mut rooms = state.rooms.lock().unwrap();
+    let mut rooms = match state.rooms.lock() {
+        Ok(rooms) => rooms,
+        Err(err) => {
+            println!("{:?}", err);
+            return Err(ServerError);
+        }
+    };
 
     let id = room.id.clone();
 
     rooms.insert(room.id, room);
 
-    Json(Id { id })
+    Ok(Json::from(Id { id }))
 }
 
 #[derive(Serialize)]
@@ -97,10 +111,25 @@ struct RoomResponse {
     users: HashSet<String>,
 }
 
-async fn get_room(State(state): State<Arc<AppState>>, Path(id): Path<Uuid>) -> impl IntoResponse {
-    let rooms = state.rooms.lock().unwrap();
+async fn get_room(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<Uuid>,
+) -> Result<Json<RoomResponse>> {
+    let rooms = match state.rooms.lock() {
+        Ok(rooms) => rooms,
+        Err(err) => {
+            println!("{:?}", err);
+            return Err(ServerError);
+        }
+    };
 
-    let room = rooms.get(&id).unwrap();
+    let room = match rooms.get(&id) {
+        Some(room) => room,
+        None => {
+            println!("No room with id {} found", id);
+            return Err(ServerError);
+        }
+    };
 
     let response = RoomResponse {
         id,
@@ -108,5 +137,5 @@ async fn get_room(State(state): State<Arc<AppState>>, Path(id): Path<Uuid>) -> i
         users: room.user_set.clone(),
     };
 
-    Json(response)
+    Ok(Json::from(response))
 }

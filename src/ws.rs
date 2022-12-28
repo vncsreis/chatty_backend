@@ -95,7 +95,14 @@ pub async fn handle_socket(ws: WebSocket, state: Arc<AppState>) {
         }
     }
 
-    let tx = tx.unwrap();
+    // let tx = tx.unwrap();
+    let tx = match tx {
+        Some(tx) => tx,
+        None => {
+            println!("No TX");
+            return;
+        }
+    };
 
     let mut rx = tx.subscribe();
 
